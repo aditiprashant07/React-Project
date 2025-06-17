@@ -15,8 +15,14 @@ import AnomalyGraph from './components/AnomalyGraph';
 import ThresholdPanel from './components/ThresholdPanel';
 import SettingsPage from './Settings';
 
-// ✅ FIXED: Use your working API endpoint
-const API_ENDPOINT = 'https://7qe1gz59x8.execute-api.ap-northeast-1.amazonaws.com/prod';
+// ✅ CORS PROXY FIX: Using CORS proxy to bypass API Gateway CORS issues
+const CORS_PROXY = 'https://cors-anywhere.herokuapp.com/';
+const API_BASE = 'https://7qe1qz59x8.execute-api.ap-northeast-1.amazonaws.com/prod';
+const API_ENDPOINT = CORS_PROXY + API_BASE;
+
+// Alternative CORS proxies if the first one doesn't work:
+// const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+// const CORS_PROXY = 'https://corsproxy.io/?';
 
 const metricExplanations = {
   'Critical Anomalies': 'Critical severity anomalies requiring immediate attention.',
@@ -35,19 +41,31 @@ function Dashboard() {
   const [anomalyWindowData, setAnomalyWindowData] = useState([]);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [openMetricInfo, setOpenMetricInfo] = useState(null);
+  const [corsProxyEnabled, setCorsProxyEnabled] = useState(true);
 
   const navigate = useNavigate();
 
-  // ✅ FIXED: Updated fetchData to work with your API Gateway response
+  // ✅ UPDATED: Enhanced fetchData with CORS proxy support
   const fetchData = async () => {
     setLoading(true);
     try {
-      console.log('🚀 Fetching data from:', API_ENDPOINT);
+      // Choose endpoint based on CORS proxy setting
+      const endpoint = corsProxyEnabled ? 
+        `${CORS_PROXY}${API_BASE}/pvt-getanomaly-data` : 
+        `${API_BASE}/pvt-getanomaly-data`;
 
-      // ✅ QUICK FIX: Remove problematic headers that trigger CORS preflight
-      const res = await fetch(API_ENDPOINT, {
+      console.log('🚀 Fetching data from:', endpoint);
+      console.log('📡 CORS Proxy enabled:', corsProxyEnabled);
+
+      // ✅ CORS PROXY: Add required headers for cors-anywhere
+      const headers = {};
+      if (corsProxyEnabled) {
+        headers['X-Requested-With'] = 'XMLHttpRequest';
+      }
+
+      const res = await fetch(endpoint, {
         method: 'GET',
-        // headers removed to bypass CORS
+        headers: headers,
         mode: 'cors'
       });
 
@@ -107,11 +125,15 @@ function Dashboard() {
       setStatistics({});
 
       if (err.message.includes('CORS') || err.message.includes('Failed to fetch')) {
-        alert(`CORS Error: API Gateway needs CORS config.
+        alert(`CORS Error: ${err.message}
 
-Temporary fix: Use CORS proxy or update CloudFormation.
+Try these solutions:
+1. Toggle CORS proxy on/off using the button
+2. Visit https://cors-anywhere.herokuapp.com/corsdemo and request access
+3. Use a different CORS proxy
+4. Fix API Gateway CORS configuration
 
-Error: ${err.message}`);
+Current endpoint: ${corsProxyEnabled ? 'CORS Proxy' : 'Direct API'}`);
       } else {
         alert(`Failed to fetch data: ${err.message}`);
       }
@@ -120,10 +142,16 @@ Error: ${err.message}`);
     }
   };
 
-  // ✅ FIXED: Add additional API methods for different endpoints
+  // ✅ UPDATED: Additional API methods with CORS proxy support
   const fetchSummary = async () => {
     try {
-      const res = await fetch(`${API_ENDPOINT.replace('/anomalies', '/summary')}`);
+      const endpoint = corsProxyEnabled ? 
+        `${CORS_PROXY}${API_BASE}/summary` : 
+        `${API_BASE}/summary`;
+      
+      const headers = corsProxyEnabled ? {'X-Requested-With': 'XMLHttpRequest'} : {};
+      
+      const res = await fetch(endpoint, { headers });
       const data = await res.json();
       console.log('📊 Summary data:', data);
       return data;
@@ -135,7 +163,13 @@ Error: ${err.message}`);
 
   const fetchDevices = async () => {
     try {
-      const res = await fetch(`${API_ENDPOINT.replace('/anomalies', '/devices')}`);
+      const endpoint = corsProxyEnabled ? 
+        `${CORS_PROXY}${API_BASE}/devices` : 
+        `${API_BASE}/devices`;
+      
+      const headers = corsProxyEnabled ? {'X-Requested-With': 'XMLHttpRequest'} : {};
+      
+      const res = await fetch(endpoint, { headers });
       const data = await res.json();
       console.log('📱 Devices data:', data);
       return data;
@@ -147,13 +181,13 @@ Error: ${err.message}`);
 
   useEffect(() => { 
     fetchData(); 
-  }, []);
+  }, [corsProxyEnabled]); // Re-fetch when CORS proxy setting changes
 
   useEffect(() => {
     if (!autoRefresh) return;
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
-  }, [autoRefresh]);
+  }, [autoRefresh, corsProxyEnabled]);
 
   // ✅ FIXED: Update filtering to work with new data structure
   const filteredAnomalies = (data || []).filter((anomaly) => {
@@ -203,30 +237,53 @@ Error: ${err.message}`);
     }
   }, [data]);
 
-  // ✅ FIXED: Add debug button for testing
+  // ✅ UPDATED: Enhanced debug function with CORS proxy testing
   const handleDebugAPI = async () => {
-    console.log('🔧 Running API Debug Tests...');
+    console.log('🔧 Running Enhanced API Debug Tests...');
     
-    // Test different endpoints
+    // Test different endpoints with and without CORS proxy
     const tests = [
-      { name: 'Anomalies', endpoint: '/anomalies' },
+      { name: 'PVT-GetAnomaly-Data', endpoint: '/pvt-getanomaly-data' },
       { name: 'Summary', endpoint: '/summary' },
-      { name: 'Devices', endpoint: '/devices' }
+      { name: 'Devices', endpoint: '/devices' },
+      { name: 'Anomalies', endpoint: '/anomalies' }
     ];
     
     for (const test of tests) {
+      // Test with CORS proxy
       try {
-        const url = `https://hjwx6b5m0b.execute-api.ap-northeast-1.amazonaws.com/prod${test.endpoint}`;
-        console.log(`🧪 Testing ${test.name}: ${url}`);
+        const url = `${CORS_PROXY}${API_BASE}${test.endpoint}`;
+        console.log(`🧪 Testing ${test.name} with CORS proxy: ${url}`);
+        
+        const res = await fetch(url, {
+          headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        });
+        const data = await res.json();
+        
+        console.log(`✅ ${test.name} (CORS proxy) response:`, data);
+      } catch (err) {
+        console.error(`❌ ${test.name} (CORS proxy) failed:`, err);
+      }
+      
+      // Test direct API
+      try {
+        const url = `${API_BASE}${test.endpoint}`;
+        console.log(`🧪 Testing ${test.name} direct: ${url}`);
         
         const res = await fetch(url);
         const data = await res.json();
         
-        console.log(`✅ ${test.name} response:`, data);
+        console.log(`✅ ${test.name} (direct) response:`, data);
       } catch (err) {
-        console.error(`❌ ${test.name} failed:`, err);
+        console.error(`❌ ${test.name} (direct) failed:`, err);
       }
     }
+  };
+
+  // ✅ NEW: Toggle CORS proxy
+  const toggleCorsProxy = () => {
+    setCorsProxyEnabled(!corsProxyEnabled);
+    console.log('🔄 CORS Proxy toggled to:', !corsProxyEnabled);
   };
 
   return (
@@ -245,7 +302,20 @@ Error: ${err.message}`);
             <span>Settings</span>
           </button>
           
-          {/* ✅ ADDED: Debug button for testing */}
+          {/* ✅ NEW: CORS Proxy Toggle */}
+          <button 
+            className={`flex items-center space-x-2 px-3 py-1 rounded-md text-sm font-medium ${
+              corsProxyEnabled 
+                ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+                : 'bg-red-100 text-red-700 hover:bg-red-200'
+            }`}
+            onClick={toggleCorsProxy}
+          >
+            <span>{corsProxyEnabled ? '🟢' : '🔴'}</span>
+            <span>CORS Proxy {corsProxyEnabled ? 'ON' : 'OFF'}</span>
+          </button>
+          
+          {/* ✅ UPDATED: Debug button */}
           <button 
             className="flex items-center space-x-2 text-gray-600 hover:text-green-600" 
             onClick={handleDebugAPI}
@@ -260,6 +330,51 @@ Error: ${err.message}`);
           </button>
         </div>
       </header>
+
+      {/* ✅ UPDATED: Status indicator with CORS proxy info */}
+      <div className="bg-white rounded-lg shadow p-4 mb-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-4">
+            <div className={`h-3 w-3 rounded-full ${loading ? 'bg-yellow-400' : 'bg-green-400'}`}></div>
+            <span className="text-sm text-gray-600">
+              {loading ? 'Loading...' : `Connected - ${data.length} anomalies loaded`}
+            </span>
+            <span className={`text-xs px-2 py-1 rounded-full ${
+              corsProxyEnabled ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+            }`}>
+              {corsProxyEnabled ? 'Via CORS Proxy' : 'Direct API'}
+            </span>
+          </div>
+          <div className="text-sm text-gray-500">
+            API: {corsProxyEnabled ? 'CORS Proxy + API Gateway' : 'Direct API Gateway'}
+          </div>
+        </div>
+      </div>
+
+      {/* ✅ CORS PROXY INFO BANNER */}
+      {corsProxyEnabled && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+          <div className="flex items-start space-x-3">
+            <AlertCircle className="text-yellow-600 mt-0.5" size={20} />
+            <div>
+              <h3 className="text-sm font-medium text-yellow-800">CORS Proxy Active</h3>
+              <p className="text-sm text-yellow-700 mt-1">
+                Using CORS proxy to bypass API Gateway CORS issues. 
+                If you get "demo server access" errors, visit{' '}
+                <a 
+                  href="https://cors-anywhere.herokuapp.com/corsdemo" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="underline font-medium"
+                >
+                  cors-anywhere demo
+                </a>{' '}
+                to request temporary access.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ✅ FIXED: Updated metric cards to show relevant data */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
@@ -278,21 +393,6 @@ Error: ${err.message}`);
             onInfo={() => setOpenMetricInfo(openMetricInfo === item.title ? null : item.title)}
           />
         ))}
-      </div>
-
-      {/* Status indicator */}
-      <div className="bg-white rounded-lg shadow p-4 mb-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <div className={`h-3 w-3 rounded-full ${loading ? 'bg-yellow-400' : 'bg-green-400'}`}></div>
-            <span className="text-sm text-gray-600">
-              {loading ? 'Loading...' : `Connected - ${data.length} anomalies loaded`}
-            </span>
-          </div>
-          <div className="text-sm text-gray-500">
-            API: {API_ENDPOINT}
-          </div>
-        </div>
       </div>
 
       {/* Thresholds */}
