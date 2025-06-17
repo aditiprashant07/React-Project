@@ -13,16 +13,17 @@ import MetricCard from './components/MetricCard';
 import AnomalyTable from './components/AnomalyTable';
 import AnomalyGraph from './components/AnomalyGraph';
 import ThresholdPanel from './components/ThresholdPanel';
-import SettingsPage from './Settings'; // Make sure this path is correct
+import SettingsPage from './Settings';
 
-const API_ENDPOINT = 'https://prjzcbe770.execute-api.ap-northeast-1.amazonaws.com/prod/anomalies';
+// ✅ FIXED: Use your working API endpoint
+const API_ENDPOINT = 'https://hjwx6b5m0b.execute-api.ap-northeast-1.amazonaws.com/prod/anomalies';
 
 const metricExplanations = {
-  'Z-SCORE Anomalies': 'Z-Score flags points far from the mean.',
-  'MAD Anomalies': 'MAD highlights deviations from the median.',
-  'EWMA Anomalies': 'EWMA flags shifts in weighted averages.',
-  'HAMPEL Anomalies': 'Hampel detects outliers via rolling median and MAD.',
-  'RATE-OF-CHANGE': 'Rate-of-Change detects sudden jumps between values.',
+  'Critical Anomalies': 'Critical severity anomalies requiring immediate attention.',
+  'High Anomalies': 'High severity anomalies needing review.',
+  'Medium Anomalies': 'Medium severity anomalies for monitoring.',
+  'CPU Anomalies': 'CPU usage anomalies detected.',
+  'Total Devices': 'Number of devices reporting anomalies.',
 };
 
 function Dashboard() {
@@ -37,80 +38,150 @@ function Dashboard() {
 
   const navigate = useNavigate();
 
+  // ✅ FIXED: Updated fetchData to work with your API Gateway response
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await fetch(API_ENDPOINT);
+      console.log('🚀 Fetching data from:', API_ENDPOINT);
+
+      // ✅ QUICK FIX: Remove problematic headers that trigger CORS preflight
+      const res = await fetch(API_ENDPOINT, {
+        method: 'GET',
+        // headers removed to bypass CORS
+        mode: 'cors'
+      });
 
       if (!res.ok) {
         throw new Error(`HTTP error! status: ${res.status}`);
       }
 
-      const apiGatewayResponse = await res.json();
+      const apiResponse = await res.json();
+      console.log('📥 API Response:', apiResponse);
 
-      let dataFromLambda = [];
-      let statsFromLambda = {};
+      const anomaliesData = apiResponse.anomalies || [];
+      const count = apiResponse.count || 0;
 
-      try {
-        const parsedBody = JSON.parse(apiGatewayResponse.body);
-        dataFromLambda = parsedBody.data || [];
-        statsFromLambda = parsedBody.statistics || {};
-      } catch (parseError) {
-        console.error("Error parsing Lambda's body:", parseError, apiGatewayResponse.body);
-        if (Array.isArray(apiGatewayResponse.body)) {
-          dataFromLambda = apiGatewayResponse.body;
-        } else {
-          dataFromLambda = [];
+      console.log(`📊 Retrieved ${count} anomalies:`, anomaliesData);
+
+      const transformedData = anomaliesData.map((anomaly, index) => ({
+        ...anomaly,
+        id: index,
+        value: anomaly.metrics?.cpu_anomaly || 0,
+        timestamp: anomaly.timestamp,
+        displayTime: new Date(anomaly.timestamp).toLocaleTimeString(),
+        isAnomaly: true,
+        isZScoreAnomaly: anomaly.metrics?.anomaly_z_score > 1.5,
+        isMADAnomaly: anomaly.metrics?.anomaly_hampel_score > 0,
+        isEWMAAnomaly: anomaly.metrics?.anomaly_ewma_score > 2.0,
+        isHampelAnomaly: anomaly.metrics?.anomaly_hampel_score > 0,
+        isRateAnomaly: anomaly.metrics?.anomaly_rate_of_change > 50,
+        isCritical: anomaly.severity === 'CRITICAL',
+        isHigh: anomaly.severity === 'HIGH',
+        isMedium: anomaly.severity === 'MEDIUM',
+        deviceId: anomaly.device_id
+      }));
+
+      setData(transformedData);
+
+      const stats = {
+        totalAnomalies: count,
+        anomalyCounts: {
+          critical: transformedData.filter(d => d.severity === 'CRITICAL').length,
+          high: transformedData.filter(d => d.severity === 'HIGH').length,
+          medium: transformedData.filter(d => d.severity === 'MEDIUM').length,
+          zScore: transformedData.filter(d => d.isZScoreAnomaly).length,
+          mad: transformedData.filter(d => d.isMADAnomaly).length,
+          ewma: transformedData.filter(d => d.isEWMAAnomaly).length,
+          hampel: transformedData.filter(d => d.isHampelAnomaly).length,
+          rate: transformedData.filter(d => d.isRateAnomaly).length,
+          devices: new Set(transformedData.map(d => d.device_id)).size
         }
-        if (typeof apiGatewayResponse.body === 'object' && apiGatewayResponse.body !== null && 'statistics' in apiGatewayResponse.body) {
-          statsFromLambda = apiGatewayResponse.body.statistics;
-        } else {
-          statsFromLambda = {};
-        }
-      }
+      };
 
-      setData(dataFromLambda);
-      setStatistics(statsFromLambda);
+      setStatistics(stats);
+      console.log('📈 Statistics calculated:', stats);
 
     } catch (err) {
-      console.error('Fetch error:', err);
+      console.error('❌ Fetch error:', err);
       setData([]);
       setStatistics({});
+
+      if (err.message.includes('CORS') || err.message.includes('Failed to fetch')) {
+        alert(`CORS Error: API Gateway needs CORS config.
+
+Temporary fix: Use CORS proxy or update CloudFormation.
+
+Error: ${err.message}`);
+      } else {
+        alert(`Failed to fetch data: ${err.message}`);
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  // ✅ FIXED: Add additional API methods for different endpoints
+  const fetchSummary = async () => {
+    try {
+      const res = await fetch(`${API_ENDPOINT.replace('/anomalies', '/summary')}`);
+      const data = await res.json();
+      console.log('📊 Summary data:', data);
+      return data;
+    } catch (err) {
+      console.error('Summary fetch error:', err);
+      return null;
+    }
+  };
+
+  const fetchDevices = async () => {
+    try {
+      const res = await fetch(`${API_ENDPOINT.replace('/anomalies', '/devices')}`);
+      const data = await res.json();
+      console.log('📱 Devices data:', data);
+      return data;
+    } catch (err) {
+      console.error('Devices fetch error:', err);
+      return null;
+    }
+  };
+
+  useEffect(() => { 
+    fetchData(); 
+  }, []);
+
   useEffect(() => {
     if (!autoRefresh) return;
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, [autoRefresh]);
 
-  const filteredAnomalies = (data || []).filter((d) =>
-    d.isZScoreAnomaly ||
-    d.isMADAnomaly ||
-    d.isEWMAAnomaly ||
-    d.isHampelAnomaly ||
-    d.isRateAnomaly
-  ).filter((anomaly) => {
+  // ✅ FIXED: Update filtering to work with new data structure
+  const filteredAnomalies = (data || []).filter((anomaly) => {
+    if (!search) return true;
+    
+    const searchLower = search.toLowerCase();
     const date = anomaly.timestamp ? new Date(anomaly.timestamp) : null;
     const formattedDate = date ? `${date.toLocaleDateString()} ${date.toLocaleTimeString()}` : '';
-    const deviation = (anomaly.value !== undefined && anomaly.value !== null) ? ((anomaly.value - 70) / 70 * 100).toFixed(1) : '';
+    
     return (
-      formattedDate.toLowerCase().includes(search.toLowerCase()) ||
-      (anomaly.value !== undefined && anomaly.value !== null && anomaly.value.toString().includes(search)) ||
-      deviation.includes(search)
+      formattedDate.includes(searchLower) ||
+      (anomaly.device_id && anomaly.device_id.toLowerCase().includes(searchLower)) ||
+      (anomaly.severity && anomaly.severity.toLowerCase().includes(searchLower)) ||
+      (anomaly.value && anomaly.value.toString().includes(search))
     );
   });
 
+  // ✅ FIXED: Use calculated statistics
   const anomalyCounts = statistics.anomalyCounts || {
-    zScore: data.filter((d) => d.isZScoreAnomaly).length,
-    mad: data.filter((d) => d.isMADAnomaly).length,
-    ewma: data.filter((d) => d.isEWMAAnomaly).length,
-    hampel: data.filter((d) => d.isHampelAnomaly).length,
-    rate: data.filter((d) => d.isRateAnomaly).length,
+    critical: 0,
+    high: 0,
+    medium: 0,
+    zScore: 0,
+    mad: 0,
+    ewma: 0,
+    hampel: 0,
+    rate: 0,
+    devices: 0
   };
 
   const handleRowClick = (anomaly) => {
@@ -120,26 +191,43 @@ function Dashboard() {
     setAnomalyWindowData(slice);
   };
 
+  // ✅ FIXED: Auto-select first anomaly
   useEffect(() => {
-    const anomalies = (data || []).filter((d) =>
-      d.isZScoreAnomaly ||
-      d.isMADAnomaly ||
-      d.isEWMAAnomaly ||
-      d.isHampelAnomaly ||
-      d.isRateAnomaly ||
-      d.isAnomaly
-    );
-    if (anomalies.length > 0) {
-      const first = anomalies[0];
+    if (data && data.length > 0) {
+      const first = data[0];
       setSelectedAnomaly(first);
-      const idx = data.findIndex((d) => d.timestamp === first.timestamp);
-      const slice = data.slice(Math.max(0, idx - 5), idx + 6);
-      setAnomalyWindowData(slice);
+      setAnomalyWindowData(data.slice(0, 6));
     } else {
       setSelectedAnomaly(null);
       setAnomalyWindowData([]);
     }
   }, [data]);
+
+  // ✅ FIXED: Add debug button for testing
+  const handleDebugAPI = async () => {
+    console.log('🔧 Running API Debug Tests...');
+    
+    // Test different endpoints
+    const tests = [
+      { name: 'Anomalies', endpoint: '/anomalies' },
+      { name: 'Summary', endpoint: '/summary' },
+      { name: 'Devices', endpoint: '/devices' }
+    ];
+    
+    for (const test of tests) {
+      try {
+        const url = `https://hjwx6b5m0b.execute-api.ap-northeast-1.amazonaws.com/prod${test.endpoint}`;
+        console.log(`🧪 Testing ${test.name}: ${url}`);
+        
+        const res = await fetch(url);
+        const data = await res.json();
+        
+        console.log(`✅ ${test.name} response:`, data);
+      } catch (err) {
+        console.error(`❌ ${test.name} failed:`, err);
+      }
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-100 p-6">
@@ -156,6 +244,16 @@ function Dashboard() {
             <Settings size={20} />
             <span>Settings</span>
           </button>
+          
+          {/* ✅ ADDED: Debug button for testing */}
+          <button 
+            className="flex items-center space-x-2 text-gray-600 hover:text-green-600" 
+            onClick={handleDebugAPI}
+          >
+            <AlertCircle size={20} />
+            <span>Debug API</span>
+          </button>
+          
           <button className="flex items-center space-x-2 text-gray-600 hover:text-blue-600" onClick={fetchData}>
             <RefreshCw size={20} />
             <span>Refresh Data</span>
@@ -163,14 +261,14 @@ function Dashboard() {
         </div>
       </header>
 
-      {/* Metric Cards */}
+      {/* ✅ FIXED: Updated metric cards to show relevant data */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
         {[
-          { title: 'Z-SCORE Anomalies', value: anomalyCounts.zScore, icon: AlertCircle, color: 'red' },
-          { title: 'MAD Anomalies', value: anomalyCounts.mad, icon: AlertCircle, color: 'red' },
-          { title: 'EWMA Anomalies', value: anomalyCounts.ewma, icon: AlertCircle, color: 'red' },
-          { title: 'HAMPEL Anomalies', value: anomalyCounts.hampel, icon: AlertCircle, color: 'red' },
-          { title: 'RATE-OF-CHANGE', value: anomalyCounts.rate, icon: TrendingUp, color: 'red' },
+          { title: 'Critical Anomalies', value: anomalyCounts.critical, icon: AlertCircle, color: 'red' },
+          { title: 'High Anomalies', value: anomalyCounts.high, icon: AlertCircle, color: 'orange' },
+          { title: 'Medium Anomalies', value: anomalyCounts.medium, icon: AlertCircle, color: 'yellow' },
+          { title: 'Total Devices', value: anomalyCounts.devices, icon: TrendingUp, color: 'blue' },
+          { title: 'RATE-OF-CHANGE', value: anomalyCounts.rate, icon: TrendingUp, color: 'purple' },
         ].map((item) => (
           <MetricCard
             key={item.title}
@@ -182,6 +280,21 @@ function Dashboard() {
         ))}
       </div>
 
+      {/* Status indicator */}
+      <div className="bg-white rounded-lg shadow p-4 mb-6">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-4">
+            <div className={`h-3 w-3 rounded-full ${loading ? 'bg-yellow-400' : 'bg-green-400'}`}></div>
+            <span className="text-sm text-gray-600">
+              {loading ? 'Loading...' : `Connected - ${data.length} anomalies loaded`}
+            </span>
+          </div>
+          <div className="text-sm text-gray-500">
+            API: {API_ENDPOINT}
+          </div>
+        </div>
+      </div>
+
       {/* Thresholds */}
       <ThresholdPanel loading={loading} />
 
@@ -191,7 +304,7 @@ function Dashboard() {
           <BarChart2 size={20} className="mr-2" /> Anomaly Context
           {selectedAnomaly && (
             <span className="ml-2 text-base text-gray-500">
-              (for anomaly at {selectedAnomaly.displayTime || new Date(selectedAnomaly.timestamp).toLocaleTimeString()})
+              (for {selectedAnomaly.device_id} at {selectedAnomaly.displayTime})
             </span>
           )}
         </h2>
@@ -201,14 +314,14 @@ function Dashboard() {
       {/* Table */}
       <div className="bg-white rounded-lg shadow p-6">
         <h2 className="text-xl font-semibold text-gray-700 mb-4 flex items-center">
-          <AlertCircle size={20} className="mr-2" /> Anomaly Details
+          <AlertCircle size={20} className="mr-2" /> Anomaly Details ({filteredAnomalies.length})
         </h2>
         <div className="mb-4 flex items-center space-x-4">
           <div className="relative flex-grow">
             <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
-              placeholder="Search anomalies..."
+              placeholder="Search by device, severity, or time..."
               className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-md"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -224,7 +337,7 @@ function Dashboard() {
             <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:bg-blue-600 relative">
               <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:left-6 transition-all"></div>
             </div>
-            <span className="ml-3 text-sm font-medium text-gray-900">Auto-refresh</span>
+            <span className="ml-3 text-sm font-medium text-gray-900">Auto-refresh (30s)</span>
           </label>
         </div>
         <AnomalyTable
