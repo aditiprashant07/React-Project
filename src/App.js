@@ -16,7 +16,7 @@ import ThresholdPanel from './components/ThresholdPanel';
 import SettingsPage from './Settings';
 
 // ✅ FIXED: Use your working API endpoint
-const API_ENDPOINT = 'https://hjwx6b5m0b.execute-api.ap-northeast-1.amazonaws.com/prod/anomalies';
+const API_ENDPOINT = 'https://tzhkgzlfs3.execute-api.ap-northeast-1.amazonaws.com/prod';
 
 const metricExplanations = {
   'Critical Anomalies': 'Critical severity anomalies requiring immediate attention.',
