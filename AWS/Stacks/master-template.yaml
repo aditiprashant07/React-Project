@@ -1,0 +1,284 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Fast-deploying IoT Anomaly Detection System
+  Simplified deployment without custom domain complexity
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: iotstuff
+
+  TemplatesBucket:
+    Type: String
+    Default: cf-nested-templates-bucket
+
+  NotificationEmail:
+    Type: String
+    AllowedPattern: ^[^\s@]+@[^\s@]+\.[^\s@]+$
+    ConstraintDescription: Must be a valid email address.
+
+  GitHubRepository:
+    Type: String
+    Default: https://github.com/aditiprashant07/React-Project
+
+  GitHubBranch:
+    Type: String
+    Default: main
+
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues: [dev, staging, prod]
+
+  EnableAmplifyFrontend:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+
+  ApiStageName:
+    Type: String
+    Default: prod
+
+  CustomDomainName:
+    Type: String
+    Default: 'xyzz.com'
+    Description: 'Custom domain for the Amplify app'
+
+  # Lambda S3 Bucket & Keys
+  LambdaCodeBucket:
+    Type: String
+    Default: lambda-code-cf-templates
+
+  AnomalyDetectionCodeKey:
+    Type: String
+    Default: 'anomaly-detection.zip'
+
+  TimestreamWriterCodeKey:
+    Type: String
+    Default: 'timestream-writer.zip'
+
+  DynamoWriterCodeKey:
+    Type: String
+    Default: 'dynamo-writer.zip'
+
+  SnsNotifierCodeKey:
+    Type: String
+    Default: 'sns-notifier.zip'
+
+  QueryLambdaCodeKey:
+    Type: String
+    Default: 'query-lambda.zip'
+
+  GetDeviceCodeKey:
+    Type: String
+    Default: 'get-device.zip'
+
+  ClientApiCodeKey:
+    Type: String
+    Default: 'client-api.zip'
+
+  GetAnomaliesCodeKey:
+    Type: String
+    Default: 'get-anomalies.zip'
+
+  GetStatusCodeKey:
+    Type: String
+    Default: 'get-device-status.zip'
+
+  RegisterProductCodeKey:
+    Type: String
+    Default: 'register-product.zip'
+
+  UpdateDeviceCodeKey:
+    Type: String
+    Default: 'update-device.zip'
+
+  IoTDeviceApiCodeKey:
+    Type: String
+    Default: 'iot-device-api.zip'
+
+Conditions:
+  DeployAmplify: !Equals [!Ref EnableAmplifyFrontend, 'true']
+
+Resources:
+  # 1. Data Storage
+  DataStorage:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${TemplatesBucket}.s3.${AWS::Region}.amazonaws.com/data-storage.yaml"
+      Parameters:
+        ProjectName: !Ref ProjectName
+
+  # 2. EventBridge
+  EventBridge:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://${TemplatesBucket}.s3.${AWS::Region}.amazonaws.com/eventbridge.yaml"
+      Parameters:
+        ProjectName: !Ref ProjectName
+
+  # 3. SNS Topic
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${ProjectName}-anomaly-notifications'
+      DisplayName: 'IoT Anomaly Notifications'
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref NotificationEmail
+
+  # 4. Lambda Functions
+  LambdaFunctions:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: [DataStorage, EventBridge, SNSTopic]
+    Properties:
+      TemplateURL: !Sub "https://${TemplatesBucket}.s3.${AWS::Region}.amazonaws.com/lambda-functions.yaml"
+      Parameters:
+        ProjectName: !Ref ProjectName
+        LambdaCodeBucket: !Ref LambdaCodeBucket
+        EventBusName: !GetAtt EventBridge.Outputs.EventBusName
+        TimestreamDatabase: !GetAtt DataStorage.Outputs.TimestreamDatabase
+        TimestreamTable: !GetAtt DataStorage.Outputs.TimestreamTable
+        DeviceRegistryTable: !GetAtt DataStorage.Outputs.DeviceRegistrationTableName
+        DeviceStatusTable: !GetAtt DataStorage.Outputs.DeviceStatusTableName
+        DeviceMetadataTable: !GetAtt DataStorage.Outputs.DeviceMetadataTableName
+        LambdaStateBucket: !GetAtt DataStorage.Outputs.LambdaStateBucketName
+        SNSTopicArn: !Ref SNSTopic
+        AnomalyDetectionCodeKey: !Ref AnomalyDetectionCodeKey
+        TimestreamWriterCodeKey: !Ref TimestreamWriterCodeKey
+        DynamoWriterCodeKey: !Ref DynamoWriterCodeKey
+        SnsNotifierCodeKey: !Ref SnsNotifierCodeKey
+        GetDeviceCodeKey: !Ref GetDeviceCodeKey
+        ClientApiCodeKey: !Ref ClientApiCodeKey
+        GetAnomaliesCodeKey: !Ref GetAnomaliesCodeKey
+        GetStatusCodeKey: !Ref GetStatusCodeKey
+        RegisterProductCodeKey: !Ref RegisterProductCodeKey
+        UpdateDeviceCodeKey: !Ref UpdateDeviceCodeKey
+
+  # 5. IoT Device API Lambda
+  IoTDeviceApiLambda:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: [DataStorage]
+    Properties:
+      TemplateURL: !Sub "https://${TemplatesBucket}.s3.${AWS::Region}.amazonaws.com/iot-device-api-lambda.yaml"
+      Parameters:
+        ProjectName: !Sub '${ProjectName}-api'
+        LambdaCodeBucket: !Ref LambdaCodeBucket
+        LambdaCodeKey: !Ref IoTDeviceApiCodeKey
+        DeviceRegistryTable: !GetAtt DataStorage.Outputs.DeviceRegistrationTableName
+        DeviceMetadataTable: !GetAtt DataStorage.Outputs.DeviceMetadataTableName
+        DeviceStatusTable: !GetAtt DataStorage.Outputs.DeviceStatusTableName
+
+  # 6. Query Lambda
+  QueryLambda:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: [DataStorage, LambdaFunctions]
+    Properties:
+      TemplateURL: !Sub "https://${TemplatesBucket}.s3.${AWS::Region}.amazonaws.com/query-lambda.yaml"
+      Parameters:
+        ProjectName: !Ref ProjectName
+        LambdaCodeBucket: !Ref LambdaCodeBucket
+        QueryLambdaCodeKey: !Ref QueryLambdaCodeKey
+        TimestreamDatabase: !GetAtt DataStorage.Outputs.TimestreamDatabase
+        TimestreamTable: !GetAtt DataStorage.Outputs.TimestreamTable
+        DeviceRegistryTable: !GetAtt DataStorage.Outputs.DeviceRegistrationTableName
+        DeviceMetadataTable: !GetAtt DataStorage.Outputs.DeviceMetadataTableName
+
+  # 7. IoT Infrastructure
+  IoTInfrastructure:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: LambdaFunctions
+    Properties:
+      TemplateURL: !Sub "https://${TemplatesBucket}.s3.${AWS::Region}.amazonaws.com/iot-infrastructure-updated.yaml"
+      Parameters:
+        ProjectName: !Ref ProjectName
+        AnomalyDetectionLambdaArn: !GetAtt LambdaFunctions.Outputs.AnomalyDetectionLambdaArn
+
+  # 8. EventBridge Rules
+  EventBridgeRules:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: [EventBridge, LambdaFunctions]
+    Properties:
+      TemplateURL: !Sub "https://${TemplatesBucket}.s3.${AWS::Region}.amazonaws.com/eventbridge-rules-updated.yaml"
+      Parameters:
+        ProjectName: !Ref ProjectName
+        EventBusName: !GetAtt EventBridge.Outputs.EventBusName
+        TimestreamWriterLambdaArn: !GetAtt LambdaFunctions.Outputs.TimestreamWriterLambdaArn
+        DynamoWriterLambdaArn: !GetAtt LambdaFunctions.Outputs.DynamoWriterLambdaArn
+        SnsNotifierLambdaArn: !GetAtt LambdaFunctions.Outputs.SnsNotifierLambdaArn
+
+  # 9. API Gateway
+  ApiGateway:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: [LambdaFunctions, QueryLambda, IoTDeviceApiLambda]
+    Properties:
+      TemplateURL: !Sub "https://${TemplatesBucket}.s3.${AWS::Region}.amazonaws.com/api-gateway-cors.yaml"
+      Parameters:
+        ProjectName: !Ref ProjectName
+        QueryLambdaArn: !GetAtt QueryLambda.Outputs.QueryLambdaFunctionArn
+        GetDeviceLambdaArn: !GetAtt LambdaFunctions.Outputs.GetDeviceLambdaArn
+        ClientApiLambdaArn: !GetAtt IoTDeviceApiLambda.Outputs.LambdaFunctionArn
+        GetAnomaliesLambdaArn: !GetAtt LambdaFunctions.Outputs.GetAnomaliesLambdaArn
+        GetStatusLambdaArn: !GetAtt LambdaFunctions.Outputs.GetStatusLambdaArn
+        RegisterProductLambdaArn: !GetAtt IoTDeviceApiLambda.Outputs.LambdaFunctionArn
+        UpdateDeviceLambdaArn: !GetAtt IoTDeviceApiLambda.Outputs.LambdaFunctionArn
+        StageName: !Ref ApiStageName
+
+  # 10. Amplify Frontend
+  AmplifyFrontend:
+    Condition: DeployAmplify
+    Type: AWS::CloudFormation::Stack
+    DependsOn: ApiGateway
+    Properties:
+      TemplateURL: !Sub "https://${TemplatesBucket}.s3.${AWS::Region}.amazonaws.com/amplify-frontend.yaml"
+      Parameters:
+        ProjectName: !Ref ProjectName
+        GitHubRepository: !Ref GitHubRepository
+        GitHubBranch: !Ref GitHubBranch
+        Environment: !Ref Environment
+        ApiGatewayUrl: !GetAtt ApiGateway.Outputs.ApiGatewayUrl
+        TimestreamEndpoint: !GetAtt ApiGateway.Outputs.TimestreamEndpoint
+        AnomaliesEndpoint: !GetAtt ApiGateway.Outputs.AnomaliesEndpoint
+        SummaryEndpoint: !GetAtt ApiGateway.Outputs.SummaryEndpoint
+        DevicesListEndpoint: !GetAtt ApiGateway.Outputs.DevicesListEndpoint
+        PvtGetAnomalyDataEndpoint: !GetAtt ApiGateway.Outputs.PvtGetAnomalyDataEndpoint
+        GetAnomaliesEndpoint: !GetAtt ApiGateway.Outputs.GetAnomaliesEndpoint
+        GetDeviceEndpoint: !GetAtt ApiGateway.Outputs.GetDeviceEndpoint
+        GetStatusEndpoint: !GetAtt ApiGateway.Outputs.GetStatusEndpoint
+        RegisterProductEndpoint: !GetAtt ApiGateway.Outputs.RegisterProductEndpoint
+        UpdateDeviceEndpoint: !GetAtt ApiGateway.Outputs.UpdateDeviceEndpoint
+        CustomDomainName: !Ref CustomDomainName
+
+Outputs:
+  ProjectName:
+    Description: Project name used for resource naming
+    Value: !Ref ProjectName
+
+  ApiGatewayUrl:
+    Description: API Gateway URL
+    Value: !GetAtt ApiGateway.Outputs.ApiGatewayUrl
+
+  IoTDeviceApiUrl:
+    Description: Direct IoT Device API URL
+    Value: !GetAtt IoTDeviceApiLambda.Outputs.LambdaFunctionUrl
+
+  AmplifyAppUrl:
+    Condition: DeployAmplify
+    Description: Frontend application URL
+    Value: !GetAtt AmplifyFrontend.Outputs.AmplifyAppUrl
+
+  CustomDomainUrl:
+    Condition: DeployAmplify
+    Description: "URL for the custom domain"
+    Value: !GetAtt AmplifyFrontend.Outputs.CustomDomainUrl
+
+  DeploymentStatus:
+    Description: Deployment status and next steps
+    Value: !Sub |
+      Core IoT System: DEPLOYED
+      API Available At: ${ApiGateway.Outputs.ApiGatewayUrl}
+      ${!If [DeployAmplify, !Sub "Frontend: ${AmplifyFrontend.Outputs.AmplifyAppUrl}", ""]}
+
+  TestKinesisCommand:
+    Description: Command to test the system
+    Value: !GetAtt IoTInfrastructure.Outputs.TestKinesisCommand

@@ -1,0 +1,160 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Query Lambda function - ONLY queries TimeStream for anomaly data, no DynamoDB access.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: 'Name prefix for all resources'
+    Default: 'iotstuff'
+
+  LambdaCodeBucket:
+    Type: String
+    Default: 'lambda-code-cf-templates'
+    Description: 'S3 bucket containing Lambda function code'
+
+  QueryLambdaCodeKey:
+    Type: String
+    Default: 'query-lambda.zip'
+    Description: 'S3 key for the query Lambda function code'
+
+  TimestreamDatabase:
+    Type: String
+    Default: 'iotdata'
+    Description: 'Name of the Timestream database'
+
+  TimestreamTable:
+    Type: String
+    Default: 'iotanomalies'
+    Description: 'Name of the Timestream table'
+
+  DeviceRegistryTable:
+    Type: String
+    Description: 'Name of the Device Registry DynamoDB table (for outputs only)'
+
+  DeviceMetadataTable:
+    Type: String
+    Description: 'Name of the Device Metadata DynamoDB table (for outputs only)'
+
+Resources:
+
+  ####################################
+  # Query Lambda IAM Role - TimeStream Only
+  ####################################
+  QueryLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-query-lambda-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: TimestreamQueryFullAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - timestream:*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - kms:DescribeKey
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - kms:CreateGrant
+                Resource: '*'
+                Condition:
+                  ForAnyValue:StringEquals:
+                    kms:EncryptionContextKeys: aws:timestream:database-name
+                  Bool:
+                    kms:GrantIsForAWSResource: true
+                  StringLike:
+                    kms:ViaService: timestream.*.amazonaws.com
+              - Effect: Allow
+                Action:
+                  - s3:ListAllMyBuckets
+                Resource: '*'
+
+  ####################################
+  # Query Lambda Function - TimeStream Only
+  ####################################
+  QueryLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-query-lambda'
+      Description: 'Lambda function to query TimeStream for anomaly data only'
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Role: !GetAtt QueryLambdaRole.Arn
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref QueryLambdaCodeKey
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          # TimeStream for anomaly data ONLY
+          TIMESTREAM_DATABASE: !Ref TimestreamDatabase
+          TIMESTREAM_TABLE: !Ref TimestreamTable
+          # AWS Region
+          REGION: !Ref AWS::Region
+          # Data source: ONLY TimeStream
+          DATA_SOURCE: 'timestream'
+          LOG_LEVEL: INFO
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Component
+          Value: QueryLambda
+        - Key: DataSources
+          Value: 'TimeStream-Only'
+        - Key: Purpose
+          Value: 'anomaly-queries-only'
+
+Outputs:
+
+  QueryLambdaFunctionArn:
+    Description: 'ARN of the query Lambda function'
+    Value: !GetAtt QueryLambdaFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-QueryLambdaFunctionArn'
+
+  QueryLambdaFunctionName:
+    Description: 'Name of the query Lambda function'
+    Value: !Ref QueryLambdaFunction
+    Export:
+      Name: !Sub '${AWS::StackName}-QueryLambdaFunctionName'
+
+  QueryLambdaRoleArn:
+    Description: 'ARN of the Lambda execution role'
+    Value: !GetAtt QueryLambdaRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-QueryLambdaRoleArn'
+
+  # Data Source Configuration
+  TimestreamDatabase:
+    Description: 'TimeStream database for anomaly queries'
+    Value: !Ref TimestreamDatabase
+
+  TimestreamTable:
+    Description: 'TimeStream table for anomaly data'
+    Value: !Ref TimestreamTable
+
+  # Legacy outputs for compatibility (not used by this Lambda)
+  DeviceRegistryTable:
+    Description: 'DynamoDB Device Registry table name (not accessed by this Lambda)'
+    Value: !Ref DeviceRegistryTable
+
+  DeviceMetadataTable:
+    Description: 'DynamoDB Device Metadata table name (not accessed by this Lambda)'
+    Value: !Ref DeviceMetadataTable

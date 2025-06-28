@@ -1,0 +1,279 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Data storage resources for IoT anomaly detection system - FIXED S3 Access Denied Error
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: 'iotstuff'
+    Description: 'Name prefix for all resources'
+
+Resources:
+
+  ####################################
+  # DynamoDB Tables
+  ####################################
+
+  # Device Registration Table
+  DeviceRegistrationTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-device-registration'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: barcode
+          AttributeType: S
+        - AttributeName: device_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: barcode
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: DeviceIdIndex
+          KeySchema:
+            - AttributeName: device_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: 'device-registration'
+
+  # Device Metadata Table
+  DeviceMetadataTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-device-metadata'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: device_id
+          AttributeType: S
+        - AttributeName: last_updated
+          AttributeType: N
+      KeySchema:
+        - AttributeName: device_id
+          KeyType: HASH
+        - AttributeName: last_updated
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: 'device-metadata'
+
+  # Device Status Table
+  DeviceStatusTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-device-status'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: device_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: N
+      KeySchema:
+        - AttributeName: device_id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: 'device-status'
+
+  ####################################
+  # TimeStream Database and Table
+  ####################################
+
+  # TimeStream Database
+  TimestreamDatabase:
+    Type: AWS::Timestream::Database
+    Properties:
+      DatabaseName: !Sub '${ProjectName}-iot-data'
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: 'iot-timeseries-data'
+
+  # TimeStream Table for Anomalies
+  TimestreamTable:
+    Type: AWS::Timestream::Table
+    Properties:
+      DatabaseName: !Ref TimestreamDatabase
+      TableName: !Sub '${ProjectName}-anomalies'
+      RetentionProperties:
+        MemoryStoreRetentionPeriodInHours: 24
+        MagneticStoreRetentionPeriodInDays: 7
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: 'anomaly-timeseries'
+
+  ####################################
+  # S3 Bucket for Lambda State Storage - FIXED
+  ####################################
+
+  # FIXED: Simplified S3 bucket to avoid access denied errors
+  LambdaStateBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      # REMOVED: Explicit bucket name to avoid naming conflicts
+      # Let AWS auto-generate unique bucket name
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+            BucketKeyEnabled: true
+      # REMOVED: Complex configurations that can cause access issues:
+      # - NotificationConfiguration
+      # - LifecycleConfiguration  
+      # - VersioningConfiguration
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: 'lambda-state-storage'
+
+  # REMOVED: Problematic lifecycle rule resource
+  # The LambdaStateBucketLifecycleRule was causing the CREATE_FAILED error
+  # Lifecycle rules can be added later through console or separate stack if needed
+
+Outputs:
+
+  ####################################
+  # DynamoDB Table Outputs
+  ####################################
+
+  DeviceRegistrationTableName:
+    Description: 'Name of the Device Registration DynamoDB table'
+    Value: !Ref DeviceRegistrationTable
+    Export:
+      Name: !Sub '${AWS::StackName}-DeviceRegistrationTableName'
+
+  DeviceRegistrationTableArn:
+    Description: 'ARN of the Device Registration DynamoDB table'
+    Value: !GetAtt DeviceRegistrationTable.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-DeviceRegistrationTableArn'
+
+  DeviceMetadataTableName:
+    Description: 'Name of the Device Metadata DynamoDB table'
+    Value: !Ref DeviceMetadataTable
+    Export:
+      Name: !Sub '${AWS::StackName}-DeviceMetadataTableName'
+
+  DeviceMetadataTableArn:
+    Description: 'ARN of the Device Metadata DynamoDB table'
+    Value: !GetAtt DeviceMetadataTable.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-DeviceMetadataTableArn'
+
+  DeviceStatusTableName:
+    Description: 'Name of the Device Status DynamoDB table'
+    Value: !Ref DeviceStatusTable
+    Export:
+      Name: !Sub '${AWS::StackName}-DeviceStatusTableName'
+
+  DeviceStatusTableArn:
+    Description: 'ARN of the Device Status DynamoDB table'
+    Value: !GetAtt DeviceStatusTable.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-DeviceStatusTableArn'
+
+  ####################################
+  # TimeStream Outputs
+  ####################################
+
+  TimestreamDatabaseName:
+    Description: 'Name of the TimeStream database'
+    Value: !Ref TimestreamDatabase
+    Export:
+      Name: !Sub '${AWS::StackName}-TimestreamDatabaseName'
+
+  TimestreamDatabaseArn:
+    Description: 'ARN of the TimeStream database'
+    Value: !GetAtt TimestreamDatabase.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-TimestreamDatabaseArn'
+
+  TimestreamTableName:
+    Description: 'Name of the TimeStream table'
+    Value: !Ref TimestreamTable
+    Export:
+      Name: !Sub '${AWS::StackName}-TimestreamTableName'
+
+  TimestreamTableArn:
+    Description: 'ARN of the TimeStream table'
+    Value: !GetAtt TimestreamTable.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-TimestreamTableArn'
+
+  ####################################
+  # S3 Bucket Outputs - FIXED
+  ####################################
+
+  LambdaStateBucketName:
+    Description: 'Name of the S3 bucket for Lambda state storage (auto-generated)'
+    Value: !Ref LambdaStateBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaStateBucketName'
+
+  LambdaStateBucketArn:
+    Description: 'ARN of the S3 bucket for Lambda state storage'
+    Value: !GetAtt LambdaStateBucket.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaStateBucketArn'
+
+  LambdaStateBucketDomainName:
+    Description: 'Domain name of the S3 bucket for Lambda state storage'
+    Value: !GetAtt LambdaStateBucket.DomainName
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaStateBucketDomainName'
+
+  ####################################
+  # Legacy Outputs for Backward Compatibility
+  ####################################
+
+  # For compatibility with original templates
+  TimestreamDatabase:
+    Description: 'TimeStream Database name (backward compatibility)'
+    Value: !Ref TimestreamDatabase
+
+  TimestreamTable:
+    Description: 'TimeStream Table name (backward compatibility)'
+    Value: !Ref TimestreamTable
+
+  DynamoDBTableName:
+    Description: 'Primary DynamoDB table name (backward compatibility)'
+    Value: !Ref DeviceRegistrationTable

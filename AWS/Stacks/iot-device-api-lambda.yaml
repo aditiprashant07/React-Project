@@ -1,0 +1,203 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Standalone IoT Device API Lambda Function with CORS support
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: 'iot-device-api'
+    Description: 'Name prefix for all resources'
+
+  LambdaCodeBucket:
+    Type: String
+    Default: 'lambda-code-cf-templates'
+    Description: 'S3 bucket containing Lambda function code'
+
+  LambdaCodeKey:
+    Type: String
+    Default: 'iot-device-api.zip'
+    Description: 'S3 key for the Lambda function ZIP file'
+
+  DeviceRegistryTable:
+    Type: String
+    Description: 'Name of the Device Registry DynamoDB table (optional)'
+    Default: ''
+
+  DeviceMetadataTable:
+    Type: String
+    Description: 'Name of the Device Metadata DynamoDB table (optional)'
+    Default: ''
+
+  DeviceStatusTable:
+    Type: String
+    Description: 'Name of the Device Status DynamoDB table (optional)'
+    Default: ''
+
+Resources:
+
+  ####################################
+  # Lambda Execution Role
+  ####################################
+
+  IoTDeviceApiLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-lambda-execution-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - lambda.amazonaws.com
+            Action: 
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*'
+        - PolicyName: CloudWatchLogsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Component
+          Value: Lambda
+
+  ####################################
+  # Lambda Function
+  ####################################
+
+  IoTDeviceApiLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-lambda'
+      Description: 'IoT Device API with CORS support - handles /pvt-getanomaly-data, /register-product, /update-device'
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.12
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref LambdaCodeKey
+      MemorySize: 256
+      Timeout: 30
+      Role: !GetAtt IoTDeviceApiLambdaRole.Arn
+      Environment:
+        Variables:
+          REGION: !Ref AWS::Region
+          DEVICE_REGISTRY_TABLE: !Ref DeviceRegistryTable
+          DEVICE_METADATA_TABLE: !Ref DeviceMetadataTable
+          DEVICE_STATUS_TABLE: !Ref DeviceStatusTable
+          LOG_LEVEL: INFO
+          PROJECT_NAME: !Ref ProjectName
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: 'iot-device-api'
+        - Key: Version
+          Value: '1.0.0'
+
+  ####################################
+  # Lambda Function URL (FIXED CORS Configuration)
+  ####################################
+
+  IoTDeviceApiLambdaUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt IoTDeviceApiLambda.Arn
+      AuthType: NONE
+      Cors:
+        AllowCredentials: false
+        AllowHeaders:
+          - content-type
+          - x-amz-date
+          - authorization
+          - x-api-key
+          - x-amz-security-token
+          - x-requested-with
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          # REMOVED OPTIONS - not supported in Lambda Function URL CORS
+        AllowOrigins:
+          - '*'
+        ExposeHeaders:
+          - content-type
+        MaxAge: 600
+
+  # Permission for Lambda URL
+  IoTDeviceApiLambdaUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref IoTDeviceApiLambda
+      Action: lambda:InvokeFunctionUrl
+      Principal: '*'
+      FunctionUrlAuthType: NONE
+
+  ####################################
+  # CloudWatch Log Group
+  ####################################
+
+  IoTDeviceApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ProjectName}-lambda'
+      RetentionInDays: 14
+
+Outputs:
+
+  # Lambda Function Outputs
+  LambdaFunctionArn:
+    Description: 'ARN of the IoT Device API Lambda function'
+    Value: !GetAtt IoTDeviceApiLambda.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaFunctionArn'
+
+  LambdaFunctionName:
+    Description: 'Name of the IoT Device API Lambda function'
+    Value: !Ref IoTDeviceApiLambda
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaFunctionName'
+
+  # Lambda Function URL (direct HTTP access)
+  LambdaFunctionUrl:
+    Description: 'HTTP URL for direct Lambda access (with CORS)'
+    Value: !GetAtt IoTDeviceApiLambdaUrl.FunctionUrl
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaFunctionUrl'
+
+  # For API Gateway Integration
+  LambdaInvokeArn:
+    Description: 'ARN for API Gateway to invoke the Lambda function'
+    Value: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${IoTDeviceApiLambda.Arn}/invocations'
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaInvokeArn'
+
+  # IAM Role ARN
+  LambdaRoleArn:
+    Description: 'ARN of the Lambda execution role'
+    Value: !GetAtt IoTDeviceApiLambdaRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaRoleArn'

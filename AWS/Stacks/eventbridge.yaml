@@ -1,0 +1,27 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: EventBridge custom bus template
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: 'Name prefix for all resources'
+
+Resources:
+  AnomalyEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub '${ProjectName}-anomaly-bus'
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Component
+          Value: EventBridge
+
+Outputs:
+  EventBusName:
+    Description: 'Name of the custom EventBridge bus'
+    Value: !Ref AnomalyEventBus
+
+  EventBusArn:
+    Description: 'ARN of the custom EventBridge bus'
+    Value: !GetAtt AnomalyEventBus.Arn

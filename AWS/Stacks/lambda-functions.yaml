@@ -1,0 +1,555 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Complete API Gateway with CORS configuration for IoT Device Management API
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: 'Name prefix for all resources'
+  
+  ClientApiLambdaArn:
+    Type: String
+    Description: 'ARN of the Client API Lambda function'
+
+  GetDeviceLambdaArn:
+    Type: String
+    Description: 'ARN of the Get Device Lambda function'
+
+  GetAnomaliesLambdaArn:
+    Type: String
+    Description: 'ARN of the Get Anomalies Lambda function'
+
+  GetStatusLambdaArn:
+    Type: String
+    Description: 'ARN of the Get Status Lambda function'
+
+  RegisterProductLambdaArn:
+    Type: String
+    Description: 'ARN of the Register Product Lambda function'
+
+  UpdateDeviceLambdaArn:
+    Type: String
+    Description: 'ARN of the Update Device Lambda function'
+
+Resources:
+
+  ####################################
+  # API Gateway REST API
+  ####################################
+
+  ApiGatewayRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub '${ProjectName}-api'
+      Description: 'IoT Device Management API with CORS enabled'
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      Policy:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: execute-api:Invoke
+            Resource: '*'
+
+  ####################################
+  # API Gateway Resources
+  ####################################
+
+  # /pvt-getanomaly-data resource
+  PvtGetAnomalyDataResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: 'pvt-getanomaly-data'
+
+  # /register-product resource
+  RegisterProductResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: 'register-product'
+
+  # /update-device resource
+  UpdateDeviceResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: 'update-device'
+
+  # /get-device resource
+  GetDeviceResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: 'get-device'
+
+  # /get-anomalies resource
+  GetAnomaliesResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: 'get-anomalies'
+
+  # /get-status resource
+  GetStatusResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: 'get-status'
+
+  ####################################
+  # GET Methods
+  ####################################
+
+  # GET /pvt-getanomaly-data
+  PvtGetAnomalyDataGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref PvtGetAnomalyDataResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ClientApiLambdaArn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+        - StatusCode: 400
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+        - StatusCode: 500
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+
+  # GET /get-device
+  GetDeviceGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref GetDeviceResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetDeviceLambdaArn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+        - StatusCode: 400
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+        - StatusCode: 500
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+
+  # GET /get-anomalies
+  GetAnomaliesGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref GetAnomaliesResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetAnomaliesLambdaArn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+        - StatusCode: 400
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+        - StatusCode: 500
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+
+  # GET /get-status
+  GetStatusGetMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref GetStatusResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetStatusLambdaArn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+        - StatusCode: 400
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+        - StatusCode: 500
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+
+  ####################################
+  # POST Methods
+  ####################################
+
+  # POST /register-product
+  RegisterProductPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref RegisterProductResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${RegisterProductLambdaArn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+        - StatusCode: 201
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+        - StatusCode: 400
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+        - StatusCode: 500
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+
+  # POST /update-device
+  UpdateDevicePostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref UpdateDeviceResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${UpdateDeviceLambdaArn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+        - StatusCode: 400
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+        - StatusCode: 500
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+
+  ####################################
+  # OPTIONS Methods for CORS
+  ####################################
+
+  # OPTIONS /pvt-getanomaly-data
+  PvtGetAnomalyDataOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref PvtGetAnomalyDataResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Max-Age: "'600'"
+            ResponseTemplates:
+              application/json: ''
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+            method.response.header.Access-Control-Max-Age: false
+
+  # OPTIONS /register-product
+  RegisterProductOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref RegisterProductResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Max-Age: "'600'"
+            ResponseTemplates:
+              application/json: ''
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+            method.response.header.Access-Control-Max-Age: false
+
+  # OPTIONS /update-device
+  UpdateDeviceOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref UpdateDeviceResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Max-Age: "'600'"
+            ResponseTemplates:
+              application/json: ''
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+            method.response.header.Access-Control-Max-Age: false
+
+  # OPTIONS /get-device
+  GetDeviceOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref GetDeviceResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Max-Age: "'600'"
+            ResponseTemplates:
+              application/json: ''
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+            method.response.header.Access-Control-Max-Age: false
+
+  # OPTIONS /get-anomalies
+  GetAnomaliesOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref GetAnomaliesResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Max-Age: "'600'"
+            ResponseTemplates:
+              application/json: ''
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+            method.response.header.Access-Control-Max-Age: false
+
+  # OPTIONS /get-status
+  GetStatusOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref GetStatusResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Max-Age: "'600'"
+            ResponseTemplates:
+              application/json: ''
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Origin: false
+            method.response.header.Access-Control-Max-Age: false
+
+  ####################################
+  # Lambda Permissions for API Gateway
+  ####################################
+
+  # Permission for ClientApiLambda
+  ClientApiLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ClientApiLambdaArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/*'
+
+  # Permission for GetDeviceLambda
+  GetDeviceLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref GetDeviceLambdaArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/*'
+
+  # Permission for GetAnomaliesLambda
+  GetAnomaliesLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref GetAnomaliesLambdaArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/*'
+
+  # Permission for GetStatusLambda
+  GetStatusLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref GetStatusLambdaArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/*'
+
+  # Permission for RegisterProductLambda
+  RegisterProductLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref RegisterProductLambdaArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/*'
+
+  # Permission for UpdateDeviceLambda
+  UpdateDeviceLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref UpdateDeviceLambdaArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/*'
+
+  ####################################
+  # API Gateway Deployment
+  ####################################
+
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - PvtGetAnomalyDataGetMethod
+      - PvtGetAnomalyDataOptionsMethod
+      - RegisterProductPostMethod
+      - RegisterProductOptionsMethod
+      - UpdateDevicePostMethod
+      - UpdateDeviceOptionsMethod
+      - GetDeviceGetMethod
+      - GetDeviceOptionsMethod
+      - GetAnomaliesGetMethod
+      - GetAnomaliesOptionsMethod
+      - GetStatusGetMethod
+      - GetStatusOptionsMethod
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      StageName: 'prod'
+      StageDescription: 'Production stage with CORS enabled'
+
+Outputs:
+  
+  # API Gateway Outputs
+  ApiGatewayUrl:
+    Description: 'Base URL of the API Gateway'
+    Value: !Sub 'https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiGatewayUrl'
+      
+  ApiGatewayRestApiId:
+    Description: 'ID of the API Gateway REST API'
+    Value: !Ref ApiGatewayRestApi
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiGatewayRestApiId'
+
+  # Individual Endpoint URLs
+  PvtGetAnomalyDataUrl:
+    Description: 'URL for GET /pvt-getanomaly-data endpoint'
+    Value: !Sub 'https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/pvt-getanomaly-data'
+
+  RegisterProductUrl:
+    Description: 'URL for POST /register-product endpoint'
+    Value: !Sub 'https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/register-product'
+
+  UpdateDeviceUrl:
+    Description: 'URL for POST /update-device endpoint'
+    Value: !Sub 'https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/update-device'
+
+  GetDeviceUrl:
+    Description: 'URL for GET /get-device endpoint'
+    Value: !Sub 'https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/get-device'
+
+  GetAnomaliesUrl:
+    Description: 'URL for GET /get-anomalies endpoint'
+    Value: !Sub 'https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/get-anomalies'
+
+  GetStatusUrl:
+    Description: 'URL for GET /get-status endpoint'
+    Value: !Sub 'https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod/get-status'

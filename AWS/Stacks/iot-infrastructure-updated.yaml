@@ -1,0 +1,133 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'IoT Infrastructure - Kinesis Stream connected to existing anomaly-detection Lambda'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: 'iotstuff'
+    Description: 'Project name for resource naming'
+  
+  AnomalyDetectionLambdaArn:
+    Type: String
+    Description: 'ARN of the existing Anomaly Detection Lambda function'
+
+Resources:
+  # Kinesis Data Stream for IoT data ingestion
+  IoTDataStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name: !Sub '${ProjectName}_iot_data_stream'
+      ShardCount: 2
+      RetentionPeriodHours: 24
+      StreamEncryption:
+        EncryptionType: KMS
+        KeyId: alias/aws/kinesis
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Component
+          Value: 'data-ingestion'
+
+  # Kinesis Event Source Mapping to connect to existing anomaly-detection Lambda
+  KinesisEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt IoTDataStream.Arn
+      FunctionName: !Ref AnomalyDetectionLambdaArn
+      StartingPosition: LATEST
+      BatchSize: 10
+      MaximumBatchingWindowInSeconds: 5
+      ParallelizationFactor: 1
+      MaximumRecordAgeInSeconds: 3600
+      BisectBatchOnFunctionError: true
+      MaximumRetryAttempts: 3
+
+  # IAM Role for Kinesis Data Producer (for IoT devices/simulators)
+  KinesisProducerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-kinesis-producer-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - iot.amazonaws.com
+                - ec2.amazonaws.com
+            Action: sts:AssumeRole
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: KinesisWriteAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kinesis:PutRecord
+                  - kinesis:PutRecords
+                  - kinesis:DescribeStream
+                Resource: !GetAtt IoTDataStream.Arn
+
+  # CloudWatch Alarms for monitoring
+  KinesisIncomingRecordsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${ProjectName}-kinesis-no-incoming-records'
+      AlarmDescription: 'No incoming records to Kinesis stream'
+      MetricName: IncomingRecords
+      Namespace: AWS/Kinesis
+      Statistic: Sum
+      Period: 900
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: StreamName
+          Value: !Ref IoTDataStream
+      TreatMissingData: breaching
+
+Outputs:
+  # Kinesis Stream outputs
+  KinesisStreamName:
+    Description: 'Name of the Kinesis Data Stream'
+    Value: !Ref IoTDataStream
+    Export:
+      Name: !Sub '${ProjectName}-kinesis-stream-name'
+
+  KinesisStreamArn:
+    Description: 'ARN of the Kinesis Data Stream'
+    Value: !GetAtt IoTDataStream.Arn
+    Export:
+      Name: !Sub '${ProjectName}-kinesis-stream-arn'
+
+  # Lambda connection info
+  ConnectedLambdaFunction:
+    Description: 'Lambda function connected to Kinesis stream'
+    Value: !Ref AnomalyDetectionLambdaArn
+
+  EventSourceMappingId:
+    Description: 'ID of the Kinesis Event Source Mapping'
+    Value: !Ref KinesisEventSourceMapping
+    Export:
+      Name: !Sub '${ProjectName}-kinesis-event-source-mapping-id'
+
+  # IAM Role outputs
+  KinesisProducerRoleArn:
+    Description: 'ARN of the Kinesis Producer IAM Role for IoT devices'
+    Value: !GetAtt KinesisProducerRole.Arn
+    Export:
+      Name: !Sub '${ProjectName}-kinesis-producer-role-arn'
+
+  # Test command
+  TestKinesisCommand:
+    Description: 'Command to test the Kinesis stream'
+    Value: !Sub |
+      aws kinesis put-record \
+        --stream-name ${IoTDataStream} \
+        --partition-key "test-device-001" \
+        --data '{"device_id":"test-device-001","cpu_usage":95.5,"hostname":"sensor01","location":"datacenter_1"}' \
+        --region ${AWS::Region}

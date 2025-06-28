@@ -1,0 +1,163 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Fixed EventBridge rules with proper Lambda permissions - no manual fixes needed
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: 'Name prefix for all resources'
+    Default: 'iotstuff'
+
+  EventBusName:
+    Type: String
+    Description: 'Name of the EventBridge custom bus'
+
+  TimestreamWriterLambdaArn:
+    Type: String
+    Description: 'ARN of the TimeStream writer Lambda function'
+
+  DynamoWriterLambdaArn:
+    Type: String
+    Description: 'ARN of the DynamoDB writer Lambda function'
+
+  SnsNotifierLambdaArn:
+    Type: String
+    Description: 'ARN of the SNS notifier Lambda function'
+
+Resources:
+
+  ##############################
+  # EventBridge Rules with Fixed Permissions
+  ##############################
+
+  # Route anomalies with metadata to TimeStream
+  TimestreamWriterRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${ProjectName}_timestream_anomaly_writer_rule'
+      Description: 'Routes anomaly events with metadata to TimeStream'
+      EventBusName: !Ref EventBusName
+      EventPattern:
+        source: 
+          - !Sub '${ProjectName}.anomaly-detection'
+        detail-type:
+          - 'AnomalyDetected'
+      State: ENABLED
+      Targets:
+        - Arn: !Ref TimestreamWriterLambdaArn
+          Id: 'TimestreamAnomalyWriterTarget'
+          # Removed InputTransformer - send full event to Lambda
+          # This ensures all data is available to the Lambda function
+
+  # Route device information to DynamoDB  
+  DynamoWriterRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${ProjectName}_dynamo_device_writer_rule'
+      Description: 'Routes device metadata to DynamoDB'
+      EventBusName: !Ref EventBusName
+      EventPattern:
+        source: 
+          - !Sub '${ProjectName}.anomaly-detection'
+        detail-type:
+          - 'AnomalyDetected'
+      State: ENABLED
+      Targets:
+        - Arn: !Ref DynamoWriterLambdaArn
+          Id: 'DynamoDeviceWriterTarget'
+          # Removed InputTransformer - send full event to Lambda
+
+  # Route all anomaly data to SNS for notifications
+  SnsNotifierRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${ProjectName}_sns_notifier_rule'
+      Description: 'Routes all anomaly events to SNS notifier'
+      EventBusName: !Ref EventBusName
+      EventPattern:
+        source: 
+          - !Sub '${ProjectName}.anomaly-detection'
+        detail-type:
+          - 'AnomalyDetected'
+      State: ENABLED
+      Targets:
+        - Arn: !Ref SnsNotifierLambdaArn
+          Id: 'SnsNotifierTarget'
+          # Send full event to SNS notifier
+
+  ##############################
+  # Lambda Permissions - FIXED
+  ##############################
+
+  # TimeStream Writer Permission
+  TimestreamWriterLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref TimestreamWriterLambdaArn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt TimestreamWriterRule.Arn
+
+  # DynamoDB Writer Permission  
+  DynamoWriterLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DynamoWriterLambdaArn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DynamoWriterRule.Arn
+
+  # SNS Notifier Permission
+  SnsNotifierLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SnsNotifierLambdaArn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt SnsNotifierRule.Arn
+
+Outputs:
+  # EventBridge Rules
+  TimestreamWriterRuleName:
+    Description: 'Name of the TimeStream anomaly writer rule'
+    Value: !Ref TimestreamWriterRule
+    Export:
+      Name: !Sub '${AWS::StackName}-TimestreamWriterRuleName'
+
+  DynamoWriterRuleName:
+    Description: 'Name of the DynamoDB device writer rule'
+    Value: !Ref DynamoWriterRule
+    Export:
+      Name: !Sub '${AWS::StackName}-DynamoWriterRuleName'
+
+  SnsNotifierRuleName:
+    Description: 'Name of the SNS notifier rule'
+    Value: !Ref SnsNotifierRule
+    Export:
+      Name: !Sub '${AWS::StackName}-SnsNotifierRuleName'
+
+  # Rule ARNs
+  TimestreamWriterRuleArn:
+    Description: 'ARN of the TimeStream anomaly writer rule'
+    Value: !GetAtt TimestreamWriterRule.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-TimestreamWriterRuleArn'
+
+  DynamoWriterRuleArn:
+    Description: 'ARN of the DynamoDB device writer rule'
+    Value: !GetAtt DynamoWriterRule.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-DynamoWriterRuleArn'
+
+  SnsNotifierRuleArn:
+    Description: 'ARN of the SNS notifier rule'
+    Value: !GetAtt SnsNotifierRule.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-SnsNotifierRuleArn'
+
+  # Summary
+  EventBridgeRulesStatus:
+    Description: 'Status of EventBridge rules deployment'
+    Value: 'All rules deployed with proper Lambda permissions'
+    Export:
+      Name: !Sub '${AWS::StackName}-EventBridgeRulesStatus'

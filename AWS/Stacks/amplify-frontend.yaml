@@ -1,0 +1,258 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Fully automated AWS Amplify App with immediate GitHub deployment and API endpoints'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: Name prefix for the Amplify app
+
+  GitHubRepository:
+    Type: String
+    Default: 'https://github.com/username/repo'
+    Description: GitHub repository URL (e.g., https://github.com/username/repo)
+
+  GitHubBranch:
+    Type: String
+    Default: 'main'
+    Description: Branch to deploy
+
+  Environment:
+    Type: String
+    Default: 'prod'
+    AllowedValues: ['dev', 'staging', 'prod']
+    Description: Amplify environment name
+
+  ApiGatewayUrl:
+    Type: String
+    Description: API Gateway base URL for frontend API calls
+
+  CustomDomainName:
+    Type: String
+    Default: 'xyzz.com'
+    Description: 'Custom domain name for the Amplify app'
+
+  # API Gateway endpoints
+  TimestreamEndpoint:
+    Type: String
+    Description: Timestream query API endpoint
+
+  AnomaliesEndpoint:
+    Type: String
+    Description: Anomalies API endpoint
+
+  SummaryEndpoint:
+    Type: String
+    Description: Summary API endpoint
+
+  DevicesListEndpoint:
+    Type: String
+    Description: Devices list API endpoint
+
+  PvtGetAnomalyDataEndpoint:
+    Type: String
+    Description: Private get anomaly data endpoint
+
+  GetAnomaliesEndpoint:
+    Type: String
+    Description: Get anomalies endpoint
+
+  GetDeviceEndpoint:
+    Type: String
+    Description: Get device endpoint
+
+  GetStatusEndpoint:
+    Type: String
+    Description: Get status endpoint
+
+  RegisterProductEndpoint:
+    Type: String
+    Description: Register product endpoint
+
+  UpdateDeviceEndpoint:
+    Type: String
+    Description: Update device endpoint
+
+Resources:
+  AmplifyApp:
+    Type: AWS::Amplify::App
+    Properties:
+      Name: !Sub "${ProjectName}-app"
+      Repository: !Ref GitHubRepository
+      AccessToken: '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'
+      Platform: WEB
+      EnvironmentVariables:
+        - Name: ENV
+          Value: !Ref Environment
+      BuildSpec: |
+        version: 1.0
+        frontend:
+          phases:
+            preBuild:
+              commands:
+                - npm ci
+            build:
+              commands:
+                - npm run build
+          artifacts:
+            baseDirectory: build
+            files:
+              - '**/*'
+          cache:
+            paths:
+              - node_modules/**/*
+      AutoBranchCreationConfig:
+        EnableAutoBuild: true
+        EnablePullRequestPreview: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+  
+  AmplifyDomain:
+    Type: AWS::Amplify::Domain
+    Properties:
+      AppId: !GetAtt AmplifyApp.AppId
+      DomainName: !Ref CustomDomainName
+      SubDomainSettings:
+        - Prefix: 'www'
+          BranchName: !Ref GitHubBranch
+
+  AmplifyBranch:
+    Type: AWS::Amplify::Branch
+    Properties:
+      AppId: !GetAtt AmplifyApp.AppId
+      BranchName: !Ref GitHubBranch
+      EnableAutoBuild: true
+      EnablePullRequestPreview: true
+      Stage: PRODUCTION
+      EnvironmentVariables:
+        - Name: ENV
+          Value: !Ref Environment
+        - Name: REACT_APP_API_GATEWAY_URL
+          Value: !Ref ApiGatewayUrl
+        - Name: REACT_APP_TIMESTREAM_ENDPOINT
+          Value: !Ref TimestreamEndpoint
+        # API endpoint environment variables
+        - Name: REACT_APP_ANOMALIES_ENDPOINT
+          Value: !Ref AnomaliesEndpoint
+        - Name: REACT_APP_SUMMARY_ENDPOINT
+          Value: !Ref SummaryEndpoint
+        - Name: REACT_APP_DEVICES_LIST_ENDPOINT
+          Value: !Ref DevicesListEndpoint
+        - Name: REACT_APP_PVT_GET_ANOMALY_DATA_ENDPOINT
+          Value: !Ref PvtGetAnomalyDataEndpoint
+        - Name: REACT_APP_GET_ANOMALIES_ENDPOINT
+          Value: !Ref GetAnomaliesEndpoint
+        - Name: REACT_APP_GET_DEVICE_ENDPOINT
+          Value: !Ref GetDeviceEndpoint
+        - Name: REACT_APP_GET_STATUS_ENDPOINT
+          Value: !Ref GetStatusEndpoint
+        - Name: REACT_APP_REGISTER_PRODUCT_ENDPOINT
+          Value: !Ref RegisterProductEndpoint
+        - Name: REACT_APP_UPDATE_DEVICE_ENDPOINT
+          Value: !Ref UpdateDeviceEndpoint
+
+  # Custom resource to trigger initial deployment
+  TriggerDeployment:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt DeploymentTriggerFunction.Arn
+      AppId: !GetAtt AmplifyApp.AppId
+      BranchName: !Ref GitHubBranch
+    DependsOn: AmplifyBranch
+
+  # Lambda function to trigger the initial deployment
+  DeploymentTriggerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-deployment-trigger"
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt DeploymentTriggerRole.Arn
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import cfnresponse
+          
+          def lambda_handler(event, context):
+              try:
+                  if event['RequestType'] == 'Create':
+                      amplify = boto3.client('amplify')
+                      
+                      app_id = event['ResourceProperties']['AppId']
+                      branch_name = event['ResourceProperties']['BranchName']
+                      
+                      # Start a job to deploy the branch
+                      response = amplify.start_job(
+                          appId=app_id,
+                          branchName=branch_name,
+                          jobType='RELEASE'
+                      )
+                      
+                      job_id = response['jobSummary']['jobId']
+                      print(f"Started deployment job: {job_id}")
+                      
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, 
+                                     {'JobId': job_id})
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                      
+              except Exception as e:
+                  print(f"Error: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+
+  # IAM Role for the Lambda function
+  DeploymentTriggerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: AmplifyDeploymentPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - amplify:StartJob
+                  - amplify:GetJob
+                Resource: !Sub "${AmplifyApp.Arn}/*"
+
+Outputs:
+  AmplifyAppId:
+    Description: Amplify App ID
+    Value: !GetAtt AmplifyApp.AppId
+    Export:
+      Name: !Sub "${AWS::StackName}-AmplifyAppId"
+
+  AmplifyAppUrl:
+    Description: Amplify App default domain URL
+    Value: !Sub "https://${GitHubBranch}.${AmplifyApp.DefaultDomain}"
+    Export:
+      Name: !Sub "${AWS::StackName}-AmplifyAppURL"
+
+  AmplifyConsoleUrl:
+    Description: Amplify Console URL to manage the app
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/amplify/home?region=${AWS::Region}#/apps/${AmplifyApp.AppId}"
+
+  AmplifyAppArn:
+    Description: Amplify App ARN
+    Value: !GetAtt AmplifyApp.Arn
+
+  CustomDomainUrl:
+    Description: "URL for the custom domain"
+    Value: !Sub "https://www.${AmplifyDomain.DomainName}"
+
+  GitHubRepository:
+    Description: Connected GitHub Repository
+    Value: !Ref GitHubRepository

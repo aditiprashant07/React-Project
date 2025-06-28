@@ -1,0 +1,200 @@
+import json
+import boto3
+import os
+import logging
+from decimal import Decimal
+from botocore.exceptions import ClientError
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger()
+
+# Initialize AWS clients
+REGION = os.environ.get('AWS_REGION', 'us-east-1')
+dynamodb = boto3.resource('dynamodb', region_name=REGION)
+s3 = boto3.client('s3', region_name=REGION)
+
+# Environment configuration
+DEVICE_REGISTRY_TABLE = os.environ.get('DEVICE_REGISTRY_TABLE')
+ANOMALY_EVENTS_TABLE = os.environ.get('ANOMALY_EVENTS_TABLE')
+
+def decimal_default(obj):
+    """JSON serializer for Decimal objects"""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    raise TypeError(f'Object of type {type(obj)} is not JSON serializable')
+
+def lambda_handler(event, context):
+    """
+    Get anomaly status and dashboard URL for a device
+    Returns device metadata plus anomaly status and graph URL
+    """
+    
+    # CORS headers
+    headers = {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent,X-Requested-With,Accept,Accept-Language,Content-Language,Cache-Control,Pragma',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS,HEAD,PATCH',
+    'Access-Control-Allow-Credentials': 'false',
+    'Access-Control-Max-Age': '86400'
+    }
+
+    try:
+        # Handle CORS preflight
+        if event.get('httpMethod') == 'OPTIONS':
+            return {'statusCode': 200, 'headers': headers, 'body': ''}
+
+        # Extract device_id from query parameters or request body
+        device_id = None
+        
+        # Try query parameters first
+        query_params = event.get('queryStringParameters') or {}
+        device_id = query_params.get('device_id')
+        
+        # If not found, try request body
+        if not device_id and event.get('body'):
+            try:
+                body = json.loads(event['body'])
+                device_id = body.get('device_id')
+            except json.JSONDecodeError:
+                pass
+
+        if not device_id:
+            return {
+                'statusCode': 400,
+                'headers': headers,
+                'body': json.dumps({'error': 'Missing device_id'})
+            }
+
+        # Get device metadata from registry table
+        registry_table = dynamodb.Table(DEVICE_REGISTRY_TABLE)
+        
+        try:
+            # Try to get by device_id using GSI
+            response = registry_table.query(
+                IndexName='device-id-index',
+                KeyConditionExpression='device_id = :device_id',
+                ExpressionAttributeValues={':device_id': device_id}
+            )
+            
+            device = None
+            if response['Items']:
+                device = response['Items'][0]
+            else:
+                # If not found by device_id, try by barcode (primary key)
+                response = registry_table.get_item(
+                    Key={'barcode': device_id}
+                )
+                
+                if 'Item' in response:
+                    device = response['Item']
+
+            if not device:
+                return {
+                    'statusCode': 404,
+                    'headers': headers,
+                    'body': json.dumps({'error': 'Device not found'})
+                }
+
+            # Check for recent anomalies to determine status
+            anomaly_table = dynamodb.Table(ANOMALY_EVENTS_TABLE)
+            
+            # Look for anomalies in the last 24 hours
+            import time
+            from datetime import datetime, timedelta
+            
+            current_time = int(time.time())
+            yesterday = current_time - (24 * 60 * 60)  # 24 hours ago
+            
+            anomaly_status = "No anomalies detected"
+            
+            try:
+                anomaly_response = anomaly_table.query(
+                    KeyConditionExpression='device_id = :device_id AND #ts > :yesterday',
+                    ExpressionAttributeNames={'#ts': 'timestamp'},
+                    ExpressionAttributeValues={
+                        ':device_id': device_id,
+                        ':yesterday': yesterday
+                    },
+                    ScanIndexForward=False,  # Get most recent first
+                    Limit=10  # Check last 10 anomalies for pattern analysis
+                )
+                
+                if anomaly_response['Items']:
+                    # Analyze anomalies to determine status
+                    anomalies = anomaly_response['Items']
+                    
+                    # Check for specific anomaly patterns based on methods
+                    critical_methods = []
+                    warning_methods = []
+                    
+                    for anomaly in anomalies:
+                        methods = anomaly.get('anomaly_methods', [])
+                        for method in methods:
+                            if method in ['temperature_spike', 'thermal_management']:
+                                critical_methods.append('overheating')
+                            elif method in ['voltage_drop', 'power_management']:
+                                warning_methods.append('battery')
+                            elif method in ['calibration_drift', 'sensor_noise']:
+                                warning_methods.append('calibration')
+                            elif method in ['version_mismatch', 'compatibility_issue']:
+                                warning_methods.append('firmware')
+                    
+                    # Determine status based on anomaly types
+                    if 'overheating' in critical_methods:
+                        anomaly_status = "Device overheating warning"
+                    elif 'battery' in warning_methods:
+                        anomaly_status = "Battery low warning"
+                    elif 'calibration' in warning_methods:
+                        anomaly_status = "Sensor calibration required"
+                    elif 'firmware' in warning_methods:
+                        anomaly_status = "Firmware update required"
+                    elif len(anomalies) >= 5:
+                        anomaly_status = "Multiple anomalies detected"
+                    elif len(anomalies) >= 2:
+                        anomaly_status = "Minor anomalies detected"
+                    else:
+                        anomaly_status = "Recent anomaly detected"
+                        
+            except Exception as e:
+                logger.warning(f"Could not check anomaly status: {e}")
+                # Continue with default status
+
+            # Generate graph URL using the Amplify app domain
+            # Note: Replace with your actual Amplify domain after deployment
+            amplify_domain = os.environ.get('AMPLIFY_DOMAIN', 'master.d1foo8stljrhaq.amplifyapp.com')
+            graph_url = f"https://{amplify_domain}/device/{device_id}"
+
+            # Build response
+            response_data = {
+                'productAnomalyStatus': anomaly_status,
+                'graphUrl': graph_url,
+                'barcode': device.get('barcode', device_id),
+                'productName': device.get('productName', device.get('product_name', 'Unknown Product')),
+                'modelNo': device.get('modelNo', device.get('model_no', 'Unknown Model')),
+                'serialNo': device.get('serialNo', device.get('serial_no', 'Unknown Serial')),
+                'manufacturerName': device.get('manufacturerName', device.get('manufacturer_name', 'Unknown Manufacturer'))
+            }
+
+            return {
+                'statusCode': 200,
+                'headers': headers,
+                'body': json.dumps(response_data, default=decimal_default)
+            }
+
+        except ClientError as e:
+            logger.error(f"DynamoDB error: {e}")
+            return {
+                'statusCode': 500,
+                'headers': headers,
+                'body': json.dumps({'error': 'Internal server error'})
+            }
+
+    except Exception as e:
+        logger.error(f"Lambda execution error: {str(e)}")
+        return {
+            'statusCode': 500,
+            'headers': headers,
+            'body': json.dumps({'error': 'Detailed error message'})
+        }

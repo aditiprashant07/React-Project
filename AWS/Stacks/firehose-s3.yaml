@@ -1,0 +1,124 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Deploys a Kinesis Firehose delivery stream from an existing Kinesis Stream to S3.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: 'Prefix for all resources (e.g., myproject)'
+
+  KinesisStreamArn:
+    Type: String
+    Description: 'ARN of the existing Kinesis Data Stream'
+
+  BufferInterval:
+    Type: Number
+    Default: 300
+    MinValue: 60
+    MaxValue: 900
+
+  BufferSize:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 128
+
+  CompressionFormat:
+    Type: String
+    Default: 'GZIP'
+    AllowedValues: ['UNCOMPRESSED', 'GZIP', 'ZIP', 'Snappy', 'HADOOP_SNAPPY']
+
+Resources:
+
+  IoTDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-iot-data-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  FirehoseLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/kinesisfirehose/${ProjectName}-firehose-log'
+      RetentionInDays: 7
+
+  FirehoseDeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-firehose-role-${AWS::Region}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: FirehoseAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:AbortMultipartUpload
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                  - s3:PutObject
+                Resource:
+                  - !Sub 'arn:aws:s3:::${ProjectName}-iot-data-${AWS::AccountId}-${AWS::Region}'
+                  - !Sub 'arn:aws:s3:::${ProjectName}-iot-data-${AWS::AccountId}-${AWS::Region}/*'
+              - Effect: Allow
+                Action:
+                  - logs:PutLogEvents
+                  - logs:CreateLogStream
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/kinesisfirehose/${ProjectName}-firehose-log:*'
+              - Effect: Allow
+                Action:
+                  - kinesis:DescribeStream
+                  - kinesis:GetShardIterator
+                  - kinesis:GetRecords
+                  - kinesis:ListShards
+                Resource: !Ref KinesisStreamArn
+
+  IoTDataFirehose:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    DependsOn:
+      - FirehoseLogGroup
+    Properties:
+      DeliveryStreamName: !Sub '${ProjectName}-iot-firehose'
+      DeliveryStreamType: KinesisStreamAsSource
+      KinesisStreamSourceConfiguration:
+        KinesisStreamARN: !Ref KinesisStreamArn
+        RoleARN: !GetAtt FirehoseDeliveryRole.Arn
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !GetAtt IoTDataBucket.Arn
+        Prefix: 'iot-data/'
+        ErrorOutputPrefix: 'errors/'
+        BufferingHints:
+          SizeInMBs: !Ref BufferSize
+          IntervalInSeconds: !Ref BufferInterval
+        CompressionFormat: !Ref CompressionFormat
+        RoleARN: !GetAtt FirehoseDeliveryRole.Arn
+        CloudWatchLoggingOptions:
+          Enabled: true
+          LogGroupName: !Ref FirehoseLogGroup
+          LogStreamName: !Sub '${ProjectName}-firehose-log-stream'
+
+Outputs:
+  S3BucketName:
+    Description: 'Name of the S3 bucket storing IoT data'
+    Value: !Ref IoTDataBucket
+
+  FirehoseStreamName:
+    Description: 'Name of the Kinesis Data Firehose delivery stream'
+    Value: !Ref IoTDataFirehose
