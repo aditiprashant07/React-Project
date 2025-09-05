@@ -15,7 +15,7 @@ import AnomalyGraph from './components/AnomalyGraph';
 import ThresholdPanel from './components/ThresholdPanel';
 import SettingsPage from './Settings'; // Make sure this path is correct
 
-const API_ENDPOINT = 'https://prjzcbe770.execute-api.ap-northeast-1.amazonaws.com/prod/anomalies';
+const API_ENDPOINT = process.env.REACT_APP_API_ENDPOINT || 'https://prjzcbe770.execute-api.ap-northeast-1.amazonaws.com/prod/anomalies';
 
 const metricExplanations = {
   'Z-SCORE Anomalies': 'Z-Score flags points far from the mean.',
@@ -40,7 +40,14 @@ function Dashboard() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const res = await fetch(API_ENDPOINT);
+      const res = await fetch(API_ENDPOINT, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        // Add timeout for production
+        signal: AbortSignal.timeout(10000) // 10 second timeout
+      });
 
       if (!res.ok) {
         throw new Error(`HTTP error! status: ${res.status}`);
@@ -74,6 +81,10 @@ function Dashboard() {
 
     } catch (err) {
       console.error('Fetch error:', err);
+      // In production, you might want to show a user-friendly error message
+      if (process.env.NODE_ENV === 'production') {
+        console.warn('Failed to fetch data from API. Please check your connection and try again.');
+      }
       setData([]);
       setStatistics({});
     } finally {

@@ -1,0 +1,90 @@
+---
+# amplify-react-app-manual-deploy.yaml
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  CloudFormation template for deploying an AWS Amplify App for manual
+  deployment (no Git connection).
+
+Parameters:
+  AppName:
+    Type: String
+    Description: The name for your AWS Amplify Application.
+    Default: Iot-Dashboard
+
+  BranchName:
+    Type: String
+    Description: The name of the branch to create in Amplify.
+    Default: main
+
+  Repository:
+    Type: String
+    Description: The GitHub repository URL for the React application.
+    Default: https://github.com/aditiprashant07/React-Project
+
+  OAuthToken:
+    Type: String
+    Description: GitHub OAuth token for repository access.
+    NoEcho: true
+    Default: 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
+
+Resources:
+  # 1. AWS Amplify Application with Git repository connection
+  AmplifyApp:
+    Type: AWS::Amplify::App
+    Properties:
+      Name: !Ref AppName
+      Description: IoT Anomaly Detection Dashboard - React application with Git-based deployment
+      Platform: WEB
+      Repository: !Ref Repository
+      OauthToken: !Ref OAuthToken
+      BuildSpec: |
+        version: 1
+        frontend:
+          phases:
+            preBuild:
+              commands:
+                - echo "Installing dependencies..."
+                - npm ci
+            build:
+              commands:
+                - echo "Building the React app..."
+                - npm run build
+          artifacts:
+            baseDirectory: build
+            files:
+              - '**/*'
+          cache:
+            paths:
+              - node_modules/**/*
+      EnvironmentVariables:
+        REACT_APP_ENVIRONMENT: "production"
+        REACT_APP_API_ENDPOINT: "https://prjzcbe770.execute-api.ap-northeast-1.amazonaws.com/prod/anomalies"
+        REACT_APP_BUILD_TYPE: "amplify"
+
+  # 2. Amplify Branch for the Git-based deployment
+  AmplifyBranch:
+    Type: AWS::Amplify::Branch
+    Properties:
+      AppId: !GetAtt AmplifyApp.AppId
+      BranchName: !Ref BranchName
+      Stage: PRODUCTION
+      EnableAutoBuild: true
+      EnvironmentVariables:
+        REACT_APP_BUILD_TYPE: "amplify-git"
+
+Outputs:
+  AmplifyAppId:
+    Description: The ID of the Amplify Application.
+    Value: !GetAtt AmplifyApp.AppId
+
+  AmplifyAppName:
+    Description: The Name of the Amplify Application.
+    Value: !GetAtt AmplifyApp.Name
+
+  AmplifyAppDefaultDomain:
+    Description: The default domain of the Amplify Application.
+    Value: !GetAtt AmplifyApp.DefaultDomain
+
+  AmplifyAppUrl:
+    Description: The URL of the deployed application.
+    Value: !Sub "https://${BranchName}.${AmplifyApp.DefaultDomain}"
