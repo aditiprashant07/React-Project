@@ -1,0 +1,8 @@
+# AWS Amplify redirects for SPA routing
+# This file should be in the public directory
+
+# Handle favicon requests
+/favicon.ico /favicon.ico 200
+
+# Handle all other requests - redirect to index.html for React Router
+/* /index.html 200

@@ -25,7 +25,7 @@ Parameters:
     Type: String
     Description: GitHub OAuth token for repository access.
     NoEcho: true
-    Default: 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
+    Default: YOUR_NEW_OAUTH_TOKEN_HERE
 
 Resources:
   # 1. AWS Amplify Application with Git repository connection
